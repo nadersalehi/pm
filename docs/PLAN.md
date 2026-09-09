@@ -176,22 +176,22 @@ frontend-demo interaction has a corresponding, tested API route.
 Replace the frontend's in-memory `initialData`/local state with real API
 calls, making the Kanban board persistent across reloads.
 
-- [ ] Replace `src/lib/kanban.ts`'s in-memory seed with data fetched from the
+- [x] Replace `src/lib/kanban.ts`'s in-memory seed with data fetched from the
       backend on load; keep `moveCard` and other pure helpers, adapting them
       to work with API responses.
-- [ ] Wire rename/add/delete/move handlers in `KanbanBoard.tsx` to call the
+- [x] Wire rename/add/delete/move handlers in `KanbanBoard.tsx` to call the
       corresponding backend routes (optimistic update or refetch after each
       change — pick one approach and apply it consistently).
-- [ ] Handle loading and error states (e.g. API unreachable) in the UI.
-- [ ] Update/replace frontend unit tests to mock the API instead of relying
+- [x] Handle loading and error states (e.g. API unreachable) in the UI.
+- [x] Update/replace frontend unit tests to mock the API instead of relying
       on in-memory seed data; update Playwright e2e tests to run against the
       full stack (real backend + SQLite) rather than the standalone demo.
 
 **Tests:**
-- [ ] Frontend unit tests with the API layer mocked, covering the same
+- [x] Frontend unit tests with the API layer mocked, covering the same
       interactions as before (render, rename, add/delete card) plus
       loading/error states.
-- [ ] Playwright e2e test running against the real container/stack: log in,
+- [x] Playwright e2e test running against the real container/stack: log in,
       rename a column, add a card, delete a card, reload the page, and
       confirm all changes persisted.
 

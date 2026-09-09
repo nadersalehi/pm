@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { mockLogin, mockUnauthenticated } from "./support/auth";
+import { mockBoard } from "./support/board";
 
 test.beforeEach(async ({ page }) => {
   await mockUnauthenticated(page);
   await mockLogin(page, { username: "user", password: "password" });
+  await mockBoard(page);
   await page.route("**/api/logout", (route) =>
     route.fulfill({ status: 200, json: { message: "logged out" } })
   );

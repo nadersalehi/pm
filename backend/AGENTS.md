@@ -40,9 +40,10 @@ FastAPI `app` instance run via `uvicorn app.main:app`.
   `column_ref`/`card_ref`/`parse_ref` — matches the `id: string` contract
   `frontend/src/lib/kanban.ts` already expects (see `docs/database.md`).
   `move_card` renumbers the `position` column of whichever column(s) are
-  affected — same operation `moveCard` in `kanban.ts` does today on in-memory
-  arrays; Part 7 will point the frontend at this API instead of that local
-  logic.
+  affected — mirrors what `moveCard` in `frontend/src/lib/kanban.ts` computes
+  locally for the same drag-and-drop move (that local computation still
+  drives the instant on-screen reorder; `frontend/src/lib/api.ts` persists it
+  here in the background). See `frontend/AGENTS.md`'s Persistence section.
 - `app/static/` — static files served at `/`. Not committed to git — it holds
   the built Next.js static export (`frontend/out/`) and is populated by the
   Docker build (or manually for local dev; see below). `main.py` creates this
