@@ -53,6 +53,12 @@ before any real frontend or business logic exists.
 `/` and `/api/hello` locally both work as described; `scripts/stop` cleanly
 tears the container down; `pytest` passes.
 
+**Design decisions:** `uv` project has `tool.uv.package = false` (it's an
+app, not an installable library). Port 8000 throughout. Secrets stay out of
+the image — `scripts/start.sh`/`.bat` pass `.env` via `docker run
+--env-file` rather than baking it into the `Dockerfile`. See
+`backend/AGENTS.md` / `scripts/AGENTS.md`.
+
 ---
 
 ## Part 3: Add in Frontend
@@ -85,6 +91,13 @@ serve it from FastAPI at `/`, replacing the Part 2 placeholder HTML.
 demo Kanban board (drag/drop, rename, add/delete cards all work exactly as
 in the standalone frontend), served entirely by FastAPI from static files.
 
+**Design decisions:** Multi-stage `Dockerfile` — `node:22-slim` builds the
+static export, only the output is copied into the `python:3.13-slim` runtime
+stage (no Node at runtime). `backend/app/static/` is created on import if
+missing (`STATIC_DIR.mkdir(..., exist_ok=True)`) so the app still starts
+before any frontend has ever been built; it's gitignored, not committed. See
+`backend/AGENTS.md`.
+
 ---
 
 ## Part 4: Add in a fake user sign in experience
@@ -115,6 +128,13 @@ logout, per root AGENTS.md limitations (single hardcoded user for the MVP).
 `user`/`password` logs in and shows the board; logout works and re-gates the
 board; wrong credentials are rejected with a visible error.
 
+**Design decisions:** Session mechanism is Starlette's `SessionMiddleware`
+(signed cookie via `itsdangerous`), with the secret key generated fresh at
+each process start — sessions don't survive a container restart, which is
+fine for this single hardcoded-user MVP. `GET /api/me` doubles as both the
+frontend's "am I logged in" check and the reference protected route. See
+`backend/AGENTS.md`.
+
 ---
 
 ## Part 5: Database modeling
@@ -139,6 +159,16 @@ the coverage table in `docs/database.md`.
 
 **Success criteria:** User has explicitly reviewed and approved
 `docs/database.md` and `docs/schema.json` before Part 6 begins.
+
+**Design decisions:** `users.password` was added (plaintext, matching the
+hardcoded credentials) at the user's request — Part 4's login still checks
+the hardcoded values in code, not this column; it's there so the table is a
+complete source of truth once real multi-user auth replaces that check (at
+which point it should hold a hash, not plaintext). `boards.user_id` has no
+`UNIQUE` constraint — "one board per user" is an app-level convention (Part
+6: get-or-create), not schema-enforced, so multi-board later needs no
+migration. IDs are `INTEGER PRIMARY KEY` internally, to be exposed to the
+frontend as opaque strings (`"col-3"`, `"card-12"`). See `docs/database.md`.
 
 ---
 
@@ -169,6 +199,17 @@ approved schema.
 restarting the server recreates it with a working default board; every
 frontend-demo interaction has a corresponding, tested API route.
 
+**Design decisions:** Raw `sqlite3` (stdlib), no ORM — the schema is small
+enough not to need one. IDs are encoded/decoded at the API boundary
+(`"col-{id}"` / `"card-{id}"`) via `column_ref`/`card_ref`/`parse_ref`.
+`move_card` renumbers the `position` column of whichever column(s) are
+affected (mirrors what the frontend's `moveCard` computes locally). The DB
+file (`backend/app/data/kanban.db`) is not volume-mounted in
+`scripts/start.sh` — it's ephemeral across `docker rm`/`docker run` cycles
+(survives a plain container restart, not a recreate); adding persistence
+across recreates wasn't asked for and would be scope creep at this stage.
+See `backend/AGENTS.md`.
+
 ---
 
 ## Part 7: Frontend + Backend
@@ -198,6 +239,21 @@ calls, making the Kanban board persistent across reloads.
 **Success criteria:** Reloading the browser (or restarting the container)
 preserves all board changes; every interaction goes through the backend and
 SQLite, with no client-only state left for board data.
+
+**Design decisions:** Persistence strategy is deliberately not uniform:
+typing a column title and dragging a card apply to local state immediately
+with the API call firing in the background (these need instant feedback);
+add/delete card `await` the API first (add needs the server-assigned id
+anyway, and a button click's delay is imperceptible). A failed background
+persist shows an error banner; a failed move also re-fetches the board to
+resync with the server. Went beyond the plan's literal ask by adding a
+genuinely separate full-stack e2e path — `frontend/tests-full-stack/`,
+`playwright.full-stack.config.ts`, and `scripts/test-e2e-full.sh` (builds,
+runs, and always tears down a real Docker container; no mocks) as `npm run
+test:e2e:full` — kept apart from the fast mocked `test:e2e` suite (which now
+also mocks `/api/board` and the mutation routes via `tests/support/board.ts`)
+since the full-stack one needs Docker and is much slower. See
+`frontend/AGENTS.md`.
 
 ---
 
