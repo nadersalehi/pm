@@ -1,4 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { mockAuthenticated } from "./support/auth";
+
+test.beforeEach(async ({ page }) => {
+  await mockAuthenticated(page);
+});
 
 test("loads the kanban board", async ({ page }) => {
   await page.goto("/");

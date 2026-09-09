@@ -1,0 +1,61 @@
+{
+  "database": "sqlite",
+  "tables": {
+    "users": {
+      "description": "One row per signed-in user. MVP only ever has the single hardcoded 'user' row (see root AGENTS.md), and Part 4's login route checks the hardcoded credentials in code rather than this table — `password` is stored here (plaintext, matching the hardcoded value) so the table is a complete, ready-to-use source of truth once real multi-user auth replaces the hardcoded check; it should hold a proper password hash at that point, not plaintext.",
+      "columns": {
+        "id": { "type": "INTEGER", "primary_key": true },
+        "username": { "type": "TEXT", "not_null": true, "unique": true },
+        "password": { "type": "TEXT", "not_null": true }
+      }
+    },
+    "boards": {
+      "description": "One row per board. `user_id` is a plain (non-unique) FK: the MVP's 'one board per user' rule is enforced by application logic (get-or-create the user's board), not by the schema, so multi-board later needs no migration.",
+      "columns": {
+        "id": { "type": "INTEGER", "primary_key": true },
+        "user_id": { "type": "INTEGER", "not_null": true, "references": "users.id" }
+      }
+    },
+    "columns": {
+      "description": "The board's columns. Per root AGENTS.md the set of columns is fixed (only the title can be edited) — `position` is assigned once when the board is created and never changes.",
+      "columns": {
+        "id": { "type": "INTEGER", "primary_key": true },
+        "board_id": { "type": "INTEGER", "not_null": true, "references": "boards.id" },
+        "title": { "type": "TEXT", "not_null": true },
+        "position": { "type": "INTEGER", "not_null": true }
+      }
+    },
+    "cards": {
+      "description": "Cards belonging to a column. `position` determines render order within `column_id` and is what the backend rewrites when a card is added, deleted, or moved (within or across columns).",
+      "columns": {
+        "id": { "type": "INTEGER", "primary_key": true },
+        "column_id": { "type": "INTEGER", "not_null": true, "references": "columns.id" },
+        "title": { "type": "TEXT", "not_null": true },
+        "details": { "type": "TEXT", "not_null": true, "default": "" },
+        "position": { "type": "INTEGER", "not_null": true }
+      }
+    }
+  },
+  "example": {
+    "_comment": "Mirrors frontend/src/lib/kanban.ts's initialData exactly, showing the schema loses nothing from the current demo board. This is also the data Part 6 will use to seed a fresh database.",
+    "users": [{ "id": 1, "username": "user", "password": "password" }],
+    "boards": [{ "id": 1, "user_id": 1 }],
+    "columns": [
+      { "id": 1, "board_id": 1, "title": "Backlog", "position": 0 },
+      { "id": 2, "board_id": 1, "title": "Discovery", "position": 1 },
+      { "id": 3, "board_id": 1, "title": "In Progress", "position": 2 },
+      { "id": 4, "board_id": 1, "title": "Review", "position": 3 },
+      { "id": 5, "board_id": 1, "title": "Done", "position": 4 }
+    ],
+    "cards": [
+      { "id": 1, "column_id": 1, "title": "Align roadmap themes", "details": "Draft quarterly themes with impact statements and metrics.", "position": 0 },
+      { "id": 2, "column_id": 1, "title": "Gather customer signals", "details": "Review support tags, sales notes, and churn feedback.", "position": 1 },
+      { "id": 3, "column_id": 2, "title": "Prototype analytics view", "details": "Sketch initial dashboard layout and key drill-downs.", "position": 0 },
+      { "id": 4, "column_id": 3, "title": "Refine status language", "details": "Standardize column labels and tone across the board.", "position": 0 },
+      { "id": 5, "column_id": 3, "title": "Design card layout", "details": "Add hierarchy and spacing for scanning dense lists.", "position": 1 },
+      { "id": 6, "column_id": 4, "title": "QA micro-interactions", "details": "Verify hover, focus, and loading states.", "position": 0 },
+      { "id": 7, "column_id": 5, "title": "Ship marketing page", "details": "Final copy approved and asset pack delivered.", "position": 0 },
+      { "id": 8, "column_id": 5, "title": "Close onboarding sprint", "details": "Document release notes and share internally.", "position": 1 }
+    ]
+  }
+}

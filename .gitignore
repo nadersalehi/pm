@@ -164,7 +164,7 @@ cython_debug/
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+.idea/
 
 # Ruff stuff:
 .ruff_cache/
@@ -174,3 +174,8 @@ cython_debug/
 
 .DS_Store
 
+# Built frontend static export, copied into the backend image at build time
+backend/app/static/
+
+# SQLite database file, created on first run
+backend/app/data/

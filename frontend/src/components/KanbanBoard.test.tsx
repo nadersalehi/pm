@@ -6,12 +6,19 @@ const getFirstColumn = () => screen.getAllByTestId(/column-/i)[0];
 
 describe("KanbanBoard", () => {
   it("renders five columns", () => {
-    render(<KanbanBoard />);
+    render(<KanbanBoard onLogout={() => {}} />);
     expect(screen.getAllByTestId(/column-/i)).toHaveLength(5);
   });
 
+  it("calls onLogout when the logout button is clicked", async () => {
+    const onLogout = vi.fn();
+    render(<KanbanBoard onLogout={onLogout} />);
+    await userEvent.click(screen.getByRole("button", { name: /log out/i }));
+    expect(onLogout).toHaveBeenCalledOnce();
+  });
+
   it("renames a column", async () => {
-    render(<KanbanBoard />);
+    render(<KanbanBoard onLogout={() => {}} />);
     const column = getFirstColumn();
     const input = within(column).getByLabelText("Column title");
     await userEvent.clear(input);
@@ -20,7 +27,7 @@ describe("KanbanBoard", () => {
   });
 
   it("adds and removes a card", async () => {
-    render(<KanbanBoard />);
+    render(<KanbanBoard onLogout={() => {}} />);
     const column = getFirstColumn();
     const addButton = within(column).getByRole("button", {
       name: /add a card/i,
