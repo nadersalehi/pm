@@ -40,6 +40,10 @@ beforeEach(() => {
     title: "Align roadmap themes",
     details: "Draft quarterly themes.",
   });
+  mockedApi.sendChatMessage.mockResolvedValue({
+    reply: "Sure thing.",
+    board: buildBoard(),
+  });
 });
 
 const getFirstColumn = () => screen.getAllByTestId(/column-/i)[0];
@@ -136,5 +140,45 @@ describe("KanbanBoard", () => {
     expect(within(column).getByPlaceholderText(/card title/i)).toHaveValue(
       "Will fail"
     );
+  });
+
+  it("updates the board from an AI chat reply without a reload", async () => {
+    mockedApi.sendChatMessage.mockResolvedValue({
+      reply: "Added a card to Discovery.",
+      board: {
+        columns: [
+          { id: "col-1", title: "Backlog", cardIds: ["card-1", "card-2"] },
+          { id: "col-2", title: "Discovery", cardIds: ["card-9"] },
+        ],
+        cards: {
+          "card-1": {
+            id: "card-1",
+            title: "Align roadmap themes",
+            details: "Draft quarterly themes.",
+          },
+          "card-2": {
+            id: "card-2",
+            title: "Gather customer signals",
+            details: "Review support tags.",
+          },
+          "card-9": {
+            id: "card-9",
+            title: "AI added card",
+            details: "",
+          },
+        },
+      },
+    });
+
+    render(<KanbanBoard onLogout={() => {}} />);
+    await screen.findAllByTestId(/column-/i);
+
+    await userEvent.type(
+      screen.getByLabelText("Chat message"),
+      "add a card to Discovery"
+    );
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    expect(await screen.findByText("AI added card")).toBeInTheDocument();
   });
 });

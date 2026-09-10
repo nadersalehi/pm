@@ -38,13 +38,32 @@ step. It sits behind a real (if hardcoded) login gate — see Auth below.
   `renameColumn`, `addCard`, `deleteCard`, `moveCard` wrap the other board
   routes (see `backend/app/board.py`). Imported as `import * as api from
   "@/lib/api"` at call sites to avoid colliding with `kanban.ts`'s own
-  `moveCard`.
+  `moveCard`. `sendChatMessage(message, history)` calls `POST /api/chat`
+  (see `backend/app/chat.py`) and adapts its `{reply, board}` response the
+  same way (`toBoardData` on the nested board). `ChatMessage` (`{role: "user"
+  | "assistant", content: string}`) is exported from here since both
+  `lib/api.ts` and `ChatSidebar.tsx` need the shape.
 - `src/components/KanbanBoard.tsx` — top-level client component. Fetches the
   board from the API on mount (`loading` / error / loaded states — see
   Persistence below), wires up `@dnd-kit` `DndContext`, and passes down
   rename / add-card / delete-card handlers. Renders the header (with a
-  `mutationError` banner) and a `DragOverlay` using `KanbanCardPreview` for
-  the dragged card.
+  `mutationError` banner), the column grid plus `ChatSidebar` side by side
+  (`flex-col` on small screens, `flex-row` at `lg:`), and a `DragOverlay`
+  using `KanbanCardPreview` for the dragged card. `ChatSidebar`'s
+  `onBoardUpdate` prop is wired directly to `setBoard` — every chat response
+  carries the current board (whether or not it changed anything), so the
+  board view is simply always resynced from it, no diffing needed.
+- `src/components/ChatSidebar.tsx` — the AI chat sidebar. Owns the message
+  list (`ChatMessage[]`) and input as local state (no board data lives
+  here). On send: appends the user's message locally, calls
+  `api.sendChatMessage(message, historyBeforeThisTurn)`, appends the
+  assistant's reply on success and calls `onBoardUpdate(board)`, or sets an
+  error message on failure (shown via `role="alert"`, same pattern as
+  `KanbanBoard`'s `mutationError`). Shows a "Thinking..." bubble while a
+  request is in flight. History is entirely client-owned — see the Part 9
+  design decision in `docs/PLAN.md` for why (the sidebar already needs this
+  list in state to render the transcript, so sending it each turn avoids a
+  second, backend-side source of truth).
 - `src/components/KanbanColumn.tsx` — one column: droppable container,
   editable column title (`<input>` — `onChange` updates local state on every
   keystroke via `onRename`, `onBlur` persists via `onRenameCommit`),
@@ -121,10 +140,18 @@ order (`moveCard`). IDs are opaque strings assigned by the backend
   - `src/components/KanbanBoard.test.tsx` — `vi.mock("@/lib/api")`, so no
     network involved. Covers loading state, load-error state (with the API
     layer mocked, not a real backend), logout wiring, rename (local echo +
-    persist-on-blur), add/delete a card, and a failed add keeping the form's
-    input intact. `LoginForm`/`lib/auth.ts` have no dedicated unit tests —
-    they're thin enough that the Playwright login flow (below) already
-    covers them without duplicating the same assertions at a second layer.
+    persist-on-blur), add/delete a card, a failed add keeping the form's
+    input intact, and that an AI chat reply's returned board is reflected in
+    the UI with no reload. `LoginForm`/`lib/auth.ts` have no dedicated unit
+    tests — they're thin enough that the Playwright login flow (below)
+    already covers them without duplicating the same assertions at a second
+    layer.
+  - `src/components/ChatSidebar.test.tsx` — `vi.mock("@/lib/api")`. Covers:
+    sending a message shows both the user's message and the reply; a
+    successful reply calls `onBoardUpdate` with the returned board; the
+    prior turns are sent back as `history` on the next message; a pending
+    call shows the "Thinking..." state; a rejected call shows the error
+    state.
 - Mocked e2e tests: `npm run test:e2e` (Playwright), driven against a
   `next dev` server on `127.0.0.1:3000` (see `playwright.config.ts`) with no
   real backend — `/api/*` calls are mocked with `page.route()` via
@@ -137,17 +164,28 @@ order (`moveCard`). IDs are opaque strings assigned by the backend
   - `tests/login.spec.ts` — the login gate itself: shows the login form when
     unauthenticated, rejects wrong credentials with a visible error, and a
     full login → logout round trip.
-- Full-stack e2e test: `npm run test:e2e:full` (from `frontend/`) or
+- Full-stack e2e tests: `npm run test:e2e:full` (from `frontend/`) or
   `scripts/test-e2e-full.sh` (from the repo root) — builds the real Docker
-  image, runs it, waits for `/api/hello` to respond, runs
-  `tests-full-stack/board-persistence.spec.ts` with
+  image, runs it (with `--env-file .env` so `OPENROUTER_API_KEY` reaches the
+  container — needed for the live AI test below), waits for `/api/hello` to
+  respond, runs everything in `tests-full-stack/` with
   `playwright.full-stack.config.ts` (`baseURL` = the container on `:8000`,
   no mocked routes, no `webServer` — the shell script owns the container's
-  lifecycle and always tears it down on exit via a `trap`). This is the one
-  test that actually proves persistence: log in, rename a column, add a
-  card, delete a card, reload, and assert all three changes survived against
-  the real backend + SQLite. Deliberately kept separate from `test:e2e`
-  since it needs Docker and is much slower — not part of the fast loop.
+  lifecycle and always tears it down on exit via a `trap`). Both specs share
+  that one live backend + SQLite DB, so the config sets `workers: 1` to run
+  them serially rather than racing each other's mutations. Deliberately kept
+  separate from `test:e2e` since it needs Docker (and, for the AI spec, live
+  network) and is much slower — not part of the fast loop.
+  - `tests-full-stack/board-persistence.spec.ts` — log in, rename a column,
+    add a card, delete a card, reload, and assert all three changes survived
+    against the real backend + SQLite.
+  - `tests-full-stack/ai-chat.spec.ts` — log in, send a message through the
+    real chat sidebar asking to add a card to the first column (reading that
+    column's current title from the DOM rather than assuming "Backlog",
+    since `board-persistence.spec.ts` may have already renamed it), and
+    assert the card shows up with no reload — a live, unmocked call through
+    the full Part 9 structured-output path. Uses a longer (30s) assertion
+    timeout for that one expectation, since it's waiting on a real LLM call.
 - `npm run test:all` runs the unit + mocked-e2e suites (not the full-stack
   one — run that explicitly).
 

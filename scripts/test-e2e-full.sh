@@ -13,7 +13,7 @@ trap cleanup EXIT
 
 docker build -t "$IMAGE_NAME" .
 docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
-docker run -d --name "$CONTAINER_NAME" -p 8000:8000 "$IMAGE_NAME" >/dev/null
+docker run -d --name "$CONTAINER_NAME" --env-file .env -p 8000:8000 "$IMAGE_NAME" >/dev/null
 
 echo "Waiting for the app to be ready..."
 for _ in $(seq 1 30); do

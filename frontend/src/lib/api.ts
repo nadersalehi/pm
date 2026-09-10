@@ -63,3 +63,16 @@ export const moveCard = (
     method: "POST",
     body: JSON.stringify({ column_id: columnId, index }),
   });
+
+export type ChatMessage = { role: "user" | "assistant"; content: string };
+
+export const sendChatMessage = async (
+  message: string,
+  history: ChatMessage[]
+): Promise<{ reply: string; board: BoardData }> => {
+  const response = await request<{ reply: string; board: ApiBoard }>("/api/chat", {
+    method: "POST",
+    body: JSON.stringify({ message, history }),
+  });
+  return { reply: response.reply, board: toBoardData(response.board) };
+};

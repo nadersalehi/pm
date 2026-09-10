@@ -357,20 +357,20 @@ details.
 Add the user-facing chat sidebar, wired to Part 9's endpoint, with automatic
 board refresh on AI-driven updates.
 
-- [ ] Build a sidebar component (message list, input box, send button) styled
+- [x] Build a sidebar component (message list, input box, send button) styled
       per the root AGENTS.md color scheme.
-- [ ] Wire it to the Part 9 chat endpoint: send message + relevant history,
+- [x] Wire it to the Part 9 chat endpoint: send message + relevant history,
       display the assistant's reply, and if the response included a board
       update, refresh the board view from the returned/updated board data
       (no manual page reload needed).
-- [ ] Handle loading state while waiting on the AI and error state if the
+- [x] Handle loading state while waiting on the AI and error state if the
       call fails.
 
 **Tests:**
-- [ ] Frontend unit tests with the chat API mocked: sending a message
+- [x] Frontend unit tests with the chat API mocked: sending a message
       displays the reply; a response with a board update triggers the board
       UI to reflect it without a reload; error responses show an error state.
-- [ ] Playwright e2e test against the real stack: ask the AI to modify the
+- [x] Playwright e2e test against the real stack: ask the AI to modify the
       board (e.g. "add a card to Backlog called Test AI Card") and assert the
       card appears in the UI without a manual refresh.
 
@@ -378,3 +378,31 @@ board refresh on AI-driven updates.
 sidebar, get replies, and see the Kanban board update live when the AI
 decides to change it — completing the full MVP described in the root
 AGENTS.md.
+
+**Design decisions:** `ChatSidebar` always calls `onBoardUpdate` (wired to
+`KanbanBoard`'s `setBoard`) with the board every chat response returns,
+rather than trying to detect whether an update happened — Part 9's route
+already always returns the current board, so this is simpler than diffing
+and correct either way (a no-op response just resyncs to the same state).
+Message history is plain local component state, sent back to the backend
+each turn (see Part 9's history design decision) — nothing new persisted.
+Found and fixed two real issues while verifying against the live stack: (1)
+`scripts/test-e2e-full.sh` wasn't passing `--env-file .env` to `docker run`,
+so the full-stack container had no `OPENROUTER_API_KEY` — the AI e2e test
+would have failed on every run; (2) the sidebar's message-log region and its
+input both had `aria-label`s containing "Chat message" as a substring, which
+made Playwright's (and Testing Library's) label queries ambiguous — renamed
+the log's label to "Conversation". `playwright.full-stack.config.ts` now
+sets `workers: 1` since `tests-full-stack/` moved from one spec to two
+sharing a single live container/DB, and `ai-chat.spec.ts` reads the first
+column's actual title from the DOM instead of assuming "Backlog", so it
+doesn't depend on run order against `board-persistence.spec.ts`. Verified
+live end to end: full Docker build, real login, a real chat message through
+OpenRouter, a real DB write, and the card appearing with no reload — see
+`frontend/AGENTS.md`.
+
+---
+
+This completes the MVP described in the root `AGENTS.md`: sign-in, a
+persistent single-user Kanban board, and an AI chat sidebar that can read
+and modify it.
