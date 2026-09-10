@@ -262,14 +262,14 @@ since the full-stack one needs Docker and is much slower. See
 Prove the backend can call an LLM through OpenRouter before building any
 Kanban-specific AI behavior.
 
-- [ ] Add an OpenRouter client in the backend using `OPENROUTER_API_KEY` from
+- [x] Add an OpenRouter client in the backend using `OPENROUTER_API_KEY` from
       `.env` and model `openai/gpt-oss-120b`.
-- [ ] Add a minimal internal test route/script that sends a fixed prompt
+- [x] Add a minimal internal test route/script that sends a fixed prompt
       (e.g. "What is 2+2? Answer with only the number.") and returns/logs the
       model's response.
 
 **Tests:**
-- [ ] Backend test that calls the "2+2" route/function and asserts the
+- [x] Backend test that calls the "2+2" route/function and asserts the
       response contains "4" (live call against OpenRouter — mark clearly as
       requiring network/API access, not mocked, since this step is explicitly
       about proving connectivity).
@@ -278,6 +278,17 @@ Kanban-specific AI behavior.
 confirming the API key, model name, and request/response handling all work
 end to end.
 
+**Design decisions:** Client is the `openai` Python SDK pointed at
+`base_url="https://openrouter.ai/api/v1"` (OpenRouter is OpenAI-API-compatible)
+rather than raw `httpx` — chosen because Part 9's structured outputs need
+`response_format`/JSON-schema support, which the SDK gives typed, idiomatic
+access to. The connectivity check is a plain function (`app/ai.py`'s
+`ask_ai`), not an HTTP route — nothing throwaway to expose or remove; Part 9
+adds the real chat route. `.env` is loaded via `python-dotenv` from the
+project root so `uv run pytest`/`uvicorn` work locally outside Docker (Docker
+already gets the key via `scripts/start.sh`'s `--env-file`). See
+`backend/AGENTS.md`.
+
 ---
 
 ## Part 9: AI + Kanban structured outputs
@@ -285,28 +296,28 @@ end to end.
 Extend the AI call so it always has full board context and can propose
 structured Kanban updates alongside a chat reply.
 
-- [ ] Design the request: system/context includes the current board as JSON
+- [x] Design the request: system/context includes the current board as JSON
       (per Part 5/6 schema), the user's message, and prior conversation
       history (define how history is stored/passed — e.g. client sends it
       each turn, or backend persists a conversation per user).
-- [ ] Define a Structured Outputs schema for the response: a user-facing
+- [x] Define a Structured Outputs schema for the response: a user-facing
       reply string, plus an optional board update (e.g. list of operations:
       rename column, add/edit/move/delete card) using the same shapes as the
       Part 6 API.
-- [ ] Implement a backend route that: accepts a chat message, calls the LLM
+- [x] Implement a backend route that: accepts a chat message, calls the LLM
       with board + history + message, parses the structured response,
       applies any board update via the existing Part 6 persistence logic, and
       returns the reply text plus the (possibly updated) board.
-- [ ] Decide and document how conversation history is scoped (per session,
+- [x] Decide and document how conversation history is scoped (per session,
       per user) given the single hardcoded user for MVP.
 
 **Tests:**
-- [ ] Backend tests with a mocked LLM response verifying: a reply-only
+- [x] Backend tests with a mocked LLM response verifying: a reply-only
       response changes nothing on the board; a response including a board
       update actually mutates the DB via the same code path as Part 6's
       routes; malformed/unexpected structured output is handled without
       crashing the route.
-- [ ] At least one live test against OpenRouter with a realistic prompt
+- [x] At least one live test against OpenRouter with a realistic prompt
       (e.g. "add a card called X to the Backlog column") asserting the board
       is updated as expected.
 
@@ -314,6 +325,30 @@ structured Kanban updates alongside a chat reply.
 a persisted board change verifiable via the Part 6 GET-board route; a chat
 message that's just a question changes nothing; structured output parsing
 failures are handled gracefully (no 500s).
+
+**Design decisions:** Conversation history is entirely client-owned and
+stateless on the backend: `POST /api/chat` takes `{message, history}` where
+`history` is the prior turns as `[{role, content}]`; the backend adds no
+storage or new DB table for it. This was chosen over backend-persisted
+history because Part 10's sidebar UI needs a message list in React state to
+render anyway, so the frontend already owns the canonical list — sending it
+each turn avoids a second source of truth, a new schema/table, and any
+question of session lifetime (sessions here don't survive a restart either,
+see Part 4). Given the single hardcoded user, "scoping" is moot in practice:
+each browser tab's local message list is its own conversation. Structured
+outputs use `client.chat.completions.parse(response_format=ChatReply)` — a
+Pydantic model (`ChatReply` = `reply: str` + `operations: list[Operation]`,
+`Operation` = an `op` literal plus the relevant nullable fields) — confirmed
+live that OpenRouter passes this through correctly for `openai/gpt-oss-120b`.
+Operations are applied by calling the Part 6 route functions
+(`app/board.py`) directly with a constructed request model, not via HTTP —
+same persistence code, no internal network hop. A malformed or
+id-referencing-nothing operation is caught (`HTTPException`) and silently
+dropped rather than failing the request. The OpenAI client now sets
+`timeout=30` (found via a live run that hit a genuine provider-side stall —
+see `backend/AGENTS.md`) so a stalled response can't hang a request
+indefinitely. See `backend/AGENTS.md` for `app/ai.py` / `app/chat.py`
+details.
 
 ---
 

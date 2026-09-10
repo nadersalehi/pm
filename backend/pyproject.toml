@@ -6,6 +6,8 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "itsdangerous>=2.2",
+    "openai>=1.55",
+    "python-dotenv>=1.0",
 ]
 
 [dependency-groups]

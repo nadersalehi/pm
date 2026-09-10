@@ -7,6 +7,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import SESSION_SECRET_KEY, get_current_username, verify_credentials
 from app.board import router as board_router
+from app.chat import router as chat_router
 from app.db import init_db
 
 app = FastAPI()
@@ -52,5 +53,6 @@ def me(username: str = Depends(get_current_username)) -> UserResponse:
 
 
 app.include_router(board_router)
+app.include_router(chat_router)
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

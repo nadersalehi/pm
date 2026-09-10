@@ -49,6 +49,43 @@ FastAPI `app` instance run via `uvicorn app.main:app`.
   Docker build (or manually for local dev; see below). `main.py` creates this
   directory on import if it doesn't exist yet, so the app still starts
   (serving an empty directory) before the frontend has ever been built.
+- `app/ai.py` — OpenRouter connectivity. Loads `.env` from the project root
+  (`load_dotenv`, so `uv run` works outside Docker too — Docker itself
+  already gets `OPENROUTER_API_KEY` via `scripts/start.sh`'s `--env-file`)
+  and builds a module-level `openai.OpenAI` client pointed at
+  `https://openrouter.ai/api/v1` (OpenRouter is OpenAI-API-compatible), with
+  a 30s request `timeout` so a stalled provider response can't hang a
+  request forever. `MODEL = "openai/gpt-oss-120b"`. `ask_ai(prompt: str) ->
+  str` is the plain-text entry point from Part 8. `Operation` (one board
+  mutation: `op` + the relevant optional fields) and `ChatReply` (`reply` +
+  `operations: list[Operation]`) are the Pydantic models used as the
+  Structured Outputs schema. `chat_completion(board: dict, history:
+  list[dict], message: str) -> ChatReply` builds the message list (a system
+  prompt describing the operations + the current board as JSON, then
+  history, then the new message) and calls `client.chat.completions.parse`
+  with `response_format=ChatReply` — confirmed live that `openai/gpt-oss-120b`
+  via OpenRouter honors this. Falls back to an empty-operations reply if the
+  SDK returns no parsed result (e.g. a refusal) instead of raising.
+- `app/chat.py` — the chat route: `POST /api/chat` (same auth dependency
+  pattern as `board_router`), accepting `{message, history}` where `history`
+  is `[{role, content}]` supplied by the caller each turn (see history
+  design decision below) and returning `{reply, board}` (the same `BoardOut`
+  shape as `GET /api/board`). Fetches the current board via `board.py`'s
+  `get_board`, calls `ai.chat_completion`, then applies each returned
+  `Operation` by calling the corresponding `board.py` route function
+  directly (`rename_column`/`add_card`/`update_card`/`move_card`/
+  `delete_card`) with a constructed request model and the same DB
+  connection — no HTTP-internal round trip, and it's the exact code path
+  Part 6 already tests. `_apply_operation` requires each operation's
+  necessary fields to be present and catches `HTTPException` (e.g. an
+  invalid/hallucinated id) so one bad operation is silently skipped rather
+  than failing the whole chat request — see Part 9's success criteria
+  (malformed structured output must not 500).
+- `tests/test_ai.py` — a single live test (no mocking) that calls `ask_ai`
+  with a fixed "2+2" prompt and asserts `"4"` is in the response, proving
+  the API key, model name, and request/response handling all work end to
+  end against the real OpenRouter API. Requires network access and a valid
+  `OPENROUTER_API_KEY`.
 - `tests/test_main.py` — pytest + FastAPI `TestClient` tests for the routes.
   `test_root_serves_static_site` skips itself if `app/static/index.html`
   doesn't exist yet, since that test needs a real frontend build.
@@ -58,6 +95,16 @@ FastAPI `app` instance run via `uvicorn app.main:app`.
 - `tests/test_board.py` — board CRUD route tests. An `autouse` `reset_db`
   fixture deletes and re-seeds the DB before every test for isolation; a
   `client` fixture returns an already-logged-in `TestClient`.
+- `tests/test_chat.py` — chat route tests (same `reset_db`/`client` fixture
+  pattern as `test_board.py`). Most tests monkeypatch `app.chat.chat_completion`
+  to return a fixed `ChatReply` so they run offline and deterministically:
+  a reply-only response leaves the board unchanged; a response with an
+  `add_card` operation mutates it through the real DB; an operation
+  referencing a nonexistent column is silently dropped (200, board
+  unchanged) rather than 500ing. `test_chat_live_add_card_to_backlog` is the
+  one live, unmocked test — a realistic prompt against real OpenRouter,
+  asserting the card actually lands in the DB via the full structured-output
+  path. Requires network access and a valid `OPENROUTER_API_KEY`.
 - `conftest.py` — points `DATABASE_PATH` at a fresh temp-directory file
   (`tempfile.mkdtemp()`) before any test module is imported, so pytest runs
   never touch the real `app/data/kanban.db`. Its mere presence also puts
