@@ -35,7 +35,7 @@ Frontend (from `frontend/`):
 - `npm run test:e2e:full` — Playwright against a real built Docker container
   (no mocks, live AI call); equivalent to `scripts/test-e2e-full.sh` from the
   repo root
-- `npm run test:all` — unit + mocked e2e (not the full-stack suite)
+- `npm run test:all` — lint + unit + mocked e2e (not the full-stack suite)
 - `npm run lint`
 
 Docker (from repo root):

@@ -11,15 +11,27 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 MODEL = "openai/gpt-oss-120b"
 
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.environ["OPENROUTER_API_KEY"],
-    timeout=30,
-)
+_client: OpenAI | None = None
+
+
+def _get_client() -> OpenAI:
+    global _client
+    if _client is None:
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "OPENROUTER_API_KEY is not set - required for AI chat features."
+            )
+        _client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+            timeout=30,
+        )
+    return _client
 
 
 def ask_ai(prompt: str) -> str:
-    response = client.chat.completions.create(
+    response = _get_client().chat.completions.create(
         model=MODEL,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -69,7 +81,7 @@ def chat_completion(
         *history,
         {"role": "user", "content": message},
     ]
-    completion = client.chat.completions.parse(
+    completion = _get_client().chat.completions.parse(
         model=MODEL,
         messages=messages,
         response_format=ChatReply,

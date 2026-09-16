@@ -181,4 +181,25 @@ describe("KanbanBoard", () => {
 
     expect(await screen.findByText("AI added card")).toBeInTheDocument();
   });
+
+  it("keeps the chat transcript when the assistant panel is hidden and shown", async () => {
+    render(<KanbanBoard onLogout={() => {}} />);
+    await screen.findAllByTestId(/column-/i);
+
+    await userEvent.type(screen.getByLabelText("Chat message"), "hello");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+    expect(await screen.findByText("Sure thing.")).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /hide ai assistant/i })
+    );
+    expect(
+      screen.queryByRole("textbox", { name: "Chat message" })
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /show ai assistant/i })
+    );
+    expect(screen.getByText("Sure thing.")).toBeInTheDocument();
+  });
 });

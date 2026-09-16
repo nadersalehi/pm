@@ -17,6 +17,13 @@ For the MVP, there will only be 1 Kanban board per signed in user.
 
 For the MVP, this will run locally (in a docker container)
 
+The full board (all column/card titles and details) is sent to the LLM as context on
+every chat turn, and the AI's proposed operations are applied directly with no
+confirmation step. Since card text is user-editable free text, this is a known prompt-injection
+surface (a card title could contain adversarial instructions read back by the model
+on a later turn). Accepted for the MVP's single-user scope; revisit before any
+multi-user use of the AI chat feature.
+
 ## Technical Decisions
 
 - NextJS frontend
@@ -24,6 +31,8 @@ For the MVP, this will run locally (in a docker container)
 - Everything packaged into a Docker container
 - Use "uv" as the package manager for python in the Docker container
 - Use OpenRouter for the AI calls. An OPENROUTER_API_KEY is in .env in the project root
+  (see `.env.example` for the required variable; board/auth features work without it,
+  only AI chat requires it)
 - Use `openai/gpt-oss-120b` as the model
 - Use SQLLite local database for the database, creating a new db if it doesn't exist
 - Start and Stop server scripts for Mac, PC, Linux in scripts/

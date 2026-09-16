@@ -13,6 +13,7 @@ step. It sits behind a real (if hardcoded) login gate — see Auth below.
 - Tailwind CSS v4 (via `@tailwindcss/postcss`, imported in `globals.css`)
 - `@dnd-kit/core` + `@dnd-kit/sortable` for drag and drop
 - `clsx` for conditional classnames
+- `lucide-react` for icons (all actions on the board are icon buttons)
 - Vitest + Testing Library for unit/component tests
 - Playwright for e2e tests
 
@@ -46,10 +47,19 @@ step. It sits behind a real (if hardcoded) login gate — see Auth below.
 - `src/components/KanbanBoard.tsx` — top-level client component. Fetches the
   board from the API on mount (`loading` / error / loaded states — see
   Persistence below), wires up `@dnd-kit` `DndContext`, and passes down
-  rename / add-card / delete-card handlers. Renders the header (with a
-  `mutationError` banner), the column grid plus `ChatSidebar` side by side
-  (`flex-col` on small screens, `flex-row` at `lg:`), and a `DragOverlay`
-  using `KanbanCardPreview` for the dragged card. `ChatSidebar`'s
+  rename / add-card / delete-card handlers. Layout: a one-row app bar (title,
+  column/card counts, `mutationError` banner, icon buttons to show/hide the
+  assistant and log out), then the board and `ChatSidebar`. At `lg:` the page
+  is fixed to the viewport (`h-dvh`): columns are a single row of grid tracks
+  (`auto-cols-[minmax(200px,1fr)]`) sharing the full width, each column
+  scrolls its own cards, and the board scrolls horizontally only when the
+  minimum column width no longer fits (e.g. 1280px with the assistant open).
+  Below `lg:` the page flows normally: columns become a horizontal
+  scroll-snap strip (85% width each) with the assistant stacked underneath.
+  The assistant is hidden with the `hidden` attribute rather than unmounted,
+  so the transcript survives a hide/show (covered by a unit test). A
+  `DragOverlay` renders `KanbanCardPreview` at the dragged card's measured
+  width. `ChatSidebar`'s
   `onBoardUpdate` prop is wired directly to `setBoard` — every chat response
   carries the current board (whether or not it changed anything), so the
   board view is simply always resynced from it, no diffing needed.
@@ -63,21 +73,32 @@ step. It sits behind a real (if hardcoded) login gate — see Auth below.
   request is in flight. History is entirely client-owned — see the Part 9
   design decision in `docs/PLAN.md` for why (the sidebar already needs this
   list in state to render the transcript, so sending it each turn avoids a
-  second, backend-side source of truth).
+  second, backend-side source of truth). Fixed-height panel: the transcript
+  scrolls internally and is scrolled to the newest message on every update.
 - `src/components/KanbanColumn.tsx` — one column: droppable container,
-  editable column title (`<input>` — `onChange` updates local state on every
-  keystroke via `onRename`, `onBlur` persists via `onRenameCommit`),
-  `SortableContext` wrapping its cards, empty-state placeholder, and the
-  `NewCardForm` at the bottom.
+  header row with the editable column title (`<input>` — `onChange` updates
+  local state on every keystroke via `onRename`, `onBlur` persists via
+  `onRenameCommit`), a card-count badge and a "+" icon button (accessible name
+  "Add a card") that opens `NewCardForm` at the top of the card list; then
+  `SortableContext` wrapping its cards and an empty-state placeholder.
 - `src/components/KanbanCard.tsx` — one draggable card (`useSortable`),
-  displays title/details, has a "Remove" button.
+  displays title/details, and a trash icon button (accessible name
+  "Delete <title>") in its top-right corner. On devices with hover it only
+  appears on card hover or keyboard focus; on touch devices it is always
+  visible.
 - `src/components/KanbanCardPreview.tsx` — non-interactive visual clone of a
   card, used only inside `DragOverlay` while dragging.
-- `src/components/NewCardForm.tsx` — inline add-card form; toggles between a
-  "Add a card" button and a title/details form; `onAdd(title, details)`
-  returns a `Promise<void>` — the form awaits it, only resetting/closing on
-  success (an `isSubmitting` disabled state in between), and stays open with
-  the typed input intact if it rejects, so a failed save doesn't lose input.
+- `src/components/NewCardForm.tsx` — the inline add-card form only (the
+  column owns whether it is open). Title/details inputs plus check ("Add
+  card", submit) and X ("Cancel") icon buttons; Escape also cancels.
+  `onAdd(title, details)` returns a `Promise<void>` — the form awaits it and
+  calls `onClose` only on success (the check button is disabled in between),
+  and stays open with the typed input intact if it rejects, so a failed save
+  doesn't lose input.
+- `src/components/IconButton.tsx` — shared round icon-only button. Takes a
+  `label` used as both `aria-label` and the `title` tooltip, so tests and
+  assistive tech find icon buttons by name exactly as they did text buttons.
+  `variant="primary"` is the filled purple submit style.
 - `src/components/LoginForm.tsx` — username/password form; calls
   `lib/auth.login`, shows an error message on failure, calls `onSuccess(user)`
   on success.
@@ -95,7 +116,7 @@ that calls `fetchSession()` in a `useEffect` on mount:
   static HTML shell.
 - `anonymous` renders `<LoginForm onSuccess={...} />`.
 - `authenticated` renders `<KanbanBoard onLogout={...} />`; `KanbanBoard`
-  has a "Log out" button in its header wired to that prop.
+  has a "Log out" icon button in its app bar wired to that prop.
 
 There's no client-side session storage of its own — the backend's signed
 session cookie is the source of truth; the frontend just asks `/api/me` on
@@ -114,7 +135,7 @@ interaction, deliberately, not inconsistently:
   keystroke; `moveCard` from `kanban.ts` on drag-end) and persist in the
   background (`onRenameCommit` on blur; `api.moveCard` fired right after the
   local update). A failed background persist sets `mutationError` (shown as
-  a banner under the header) — a failed move also re-fetches the board to
+  an inline banner in the app bar) — a failed move also re-fetches the board to
   resync with the server.
 - **Add / delete card** are discrete button clicks where a small delay is
   imperceptible, so these `await` the API call before touching local state
@@ -186,8 +207,14 @@ order (`moveCard`). IDs are opaque strings assigned by the backend
     assert the card shows up with no reload — a live, unmocked call through
     the full Part 9 structured-output path. Uses a longer (30s) assertion
     timeout for that one expectation, since it's waiting on a real LLM call.
-- `npm run test:all` runs the unit + mocked-e2e suites (not the full-stack
-  one — run that explicitly).
+- `npm run test:all` runs lint + the unit + mocked-e2e suites (not the
+  full-stack one — run that explicitly).
+- `src/test/vitest.d.ts` must reference `vitest/globals` (not `vitest`) and
+  `@testing-library/jest-dom/vitest` (not `@testing-library/jest-dom`) — the
+  bare specifiers resolve to Jest-flavoured types and leave `describe`/`it`/
+  `expect`/`vi` and the DOM matchers untyped. That failure shows up only in
+  `next build`'s TypeScript pass, which type-checks test files too; `vitest
+  run` passes either way.
 
 ## Conventions to follow when extending this code
 
@@ -201,3 +228,13 @@ order (`moveCard`). IDs are opaque strings assigned by the backend
   values, to stay on the palette defined in the root AGENTS.md.
 - `data-testid` attributes (`column-${id}`, `card-${id}`) are used for test
   targeting — keep these stable when refactoring markup.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
