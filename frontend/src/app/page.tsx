@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { KanbanBoard } from "@/components/KanbanBoard";
-import { LoginForm } from "@/components/LoginForm";
+import { AuthForm } from "@/components/AuthForm";
+import { Workspace } from "@/components/Workspace";
+import { setUnauthorizedHandler } from "@/lib/api";
 import { fetchSession, logout, type SessionUser } from "@/lib/auth";
 
 type AuthState =
@@ -21,8 +22,10 @@ export default function Home() {
       }
       setAuth(user ? { status: "authenticated", user } : { status: "anonymous" });
     });
+    setUnauthorizedHandler(() => setAuth({ status: "anonymous" }));
     return () => {
       cancelled = true;
+      setUnauthorizedHandler(null);
     };
   }, []);
 
@@ -36,12 +39,15 @@ export default function Home() {
   }
 
   if (auth.status === "anonymous") {
-    return (
-      <LoginForm
-        onSuccess={(user) => setAuth({ status: "authenticated", user })}
-      />
-    );
+    return <AuthForm onSuccess={(user) => setAuth({ status: "authenticated", user })} />;
   }
 
-  return <KanbanBoard onLogout={handleLogout} />;
+  return (
+    <Workspace
+      key={auth.user.username}
+      user={auth.user}
+      onLogout={handleLogout}
+      onAccountDeleted={() => setAuth({ status: "anonymous" })}
+    />
+  );
 }

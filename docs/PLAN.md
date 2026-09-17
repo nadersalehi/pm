@@ -406,3 +406,77 @@ OpenRouter, a real DB write, and the card appearing with no reload — see
 This completes the MVP described in the root `AGENTS.md`: sign-in, a
 persistent single-user Kanban board, and an AI chat sidebar that can read
 and modify it.
+
+---
+
+## Part 11: Multi-user accounts, multiple boards, richer cards
+
+Post-MVP expansion toward a full project management app.
+
+- [x] Real accounts: registration, scrypt password hashing, login against the
+      `users` table, change password, delete account (cascading).
+- [x] Multiple boards per user: list, create, rename/describe, delete, with a
+      board switcher that remembers the last board per user.
+- [x] Ownership enforced on every board, column, card and chat lookup
+      (another user's ids return 404), closing review finding S2.
+- [x] Cards gain priority and due date, edited in a card dialog; overdue and
+      due-today badges. Card search on the board.
+- [x] Columns can be added, reordered and deleted.
+- [x] AI chat scoped to one board; operations support priority and due date;
+      history capped; timeouts return 504.
+- [x] Sessions can survive restarts via optional `SESSION_SECRET`; the
+      frontend returns to sign-in on any 401.
+
+**Design decisions:** Password hashing uses the standard library's scrypt
+rather than a new dependency. Ownership lives only on `boards.user_id`;
+columns and cards are always resolved through a join to their board's
+owner, so a single set of lookup helpers guards every route and the AI's
+operations. 404 (not 403) for other users' resources avoids confirming that
+an id exists. Schema version 1 is recorded in `PRAGMA user_version`; the MVP
+database was never persisted, so there is no migration from it. While
+testing, a live OpenRouter call hung for 19 minutes despite the 30s timeout:
+OpenRouter sends whitespace keep-alive bytes during slow generations, which
+reset httpx's per-read timeout. `app/ai.py` now wraps the transport with a
+whole-request deadline.
+
+**Tests:** backend 92 tests (99% line coverage) including a parametrized
+cross-user isolation suite; frontend 84 unit tests (90% line coverage), 15
+mocked Playwright tests against a stateful in-memory fake API, and 3
+full-stack Playwright tests including two-user isolation and account
+management.
+
+---
+
+## Part 12: Labels, checklists, filters, keyboard drag and drop
+
+- [x] Board-scoped labels in the palette colors; create, rename, recolor,
+      delete; assign to cards (only from the card's own board).
+- [x] Card checklists with progress on the card face and in the dialog.
+- [x] Filters by priority, label and due window, combined with search.
+- [x] Keyboard drag and drop with readable screen reader announcements.
+- [x] AI operations for labels and checklist items.
+- [x] Schema version 2 (additive; version 1 databases upgrade in place).
+
+**Design decisions:** Label and checklist rows are joined to their board's
+owner like every other lookup. Card labels and checklists load in batched
+queries so a board's cost does not grow with its card count. Each AI
+operation now runs in its own SQLite savepoint: previously an operation that
+failed partway (a card inserted, then a label rejected) left the partial
+write behind because the chat route skips failed operations instead of
+failing the request. Checklist ticks are optimistic with rollback, like other
+instant-feedback interactions.
+
+**Bugs found while testing:** pressing Enter on a card opened the dialog and
+the same keystroke submitted its form (fixed by preventing the keydown
+default); typing the next checklist item while the previous one saved was
+wiped when the save finished (the input now clears on submit); the labels
+dialog layout broke from a conflicting width class. A live full-stack run
+also exposed two AI issues: malformed model output (raw chat-format tokens
+instead of JSON) raised an unhandled `ValidationError` (now a polite
+fallback reply), and a rejected operation was dropped silently while the
+model's reply claimed success (now logged and noted in the reply).
+
+**Tests:** backend 129 (99% line coverage) including the new endpoints in the
+isolation suite, a version 1 upgrade test and a savepoint rollback test
+confirmed to fail without the rollback; frontend 108 unit tests, 20 mocked
+Playwright tests, 4 full-stack Playwright tests.

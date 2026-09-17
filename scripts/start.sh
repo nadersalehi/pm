@@ -10,9 +10,14 @@ docker build -t "$IMAGE_NAME" .
 
 docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
+env_args=()
+if [ -f .env ]; then
+  env_args=(--env-file .env)
+fi
+
 docker run -d \
   --name "$CONTAINER_NAME" \
-  --env-file .env \
+  "${env_args[@]}" \
   -p 8000:8000 \
   "$IMAGE_NAME"
 

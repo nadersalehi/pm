@@ -179,3 +179,5 @@ backend/app/static/
 
 # SQLite database file, created on first run
 backend/app/data/
+
+.claude

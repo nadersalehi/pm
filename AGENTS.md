@@ -3,26 +3,34 @@
 ## Business Requirements
 
 This project is building a Project Management App. Key features:
-- A user can sign in
-- When signed in, the user sees a Kanban board representing their project
-- The Kanban board has fixed columns that can be renamed
-- The cards on the Kanban board can be moved with drag and drop, and edited
-- There is an AI chat feature in a sidebar; the AI is able to create / edit / move one or more cards
+- Users can create an account, sign in, change their password and delete
+  their account
+- Each user has any number of Kanban boards, and can create, rename, describe,
+  switch between and delete them
+- Boards have columns that can be added, renamed, reordered and deleted
+- Cards can be added, edited (title, details, priority, due date, labels),
+  moved with drag and drop (mouse or keyboard), searched and deleted
+- Each board has its own colored labels; cards have checklists with progress
+- Cards can be filtered by priority, label and due date
+- There is an AI chat feature in a sidebar; the AI can create / edit / move
+  cards, apply labels and manage checklist items on the current board
 
 ## Limitations
 
-For the MVP, there will only be a user sign in (hardcoded to 'user' and 'password') but the database will support multiple users for future.
+A demo account (`user` / `password`) is seeded on first run.
 
-For the MVP, there will only be 1 Kanban board per signed in user.
+This runs locally in a single Docker container; the SQLite database is not
+persisted across container rebuilds.
 
-For the MVP, this will run locally (in a docker container)
+Boards are private to their owner; there is no sharing or collaboration yet.
 
 The full board (all column/card titles and details) is sent to the LLM as context on
 every chat turn, and the AI's proposed operations are applied directly with no
 confirmation step. Since card text is user-editable free text, this is a known prompt-injection
 surface (a card title could contain adversarial instructions read back by the model
-on a later turn). Accepted for the MVP's single-user scope; revisit before any
-multi-user use of the AI chat feature.
+on a later turn). Operations are confined to the chat's own board and the
+signed-in user's data, so an injection cannot reach another user; revisit
+before adding shared boards.
 
 ## Technical Decisions
 
@@ -31,8 +39,8 @@ multi-user use of the AI chat feature.
 - Everything packaged into a Docker container
 - Use "uv" as the package manager for python in the Docker container
 - Use OpenRouter for the AI calls. An OPENROUTER_API_KEY is in .env in the project root
-  (see `.env.example` for the required variable; board/auth features work without it,
-  only AI chat requires it)
+  (see `.env.example`; boards and accounts work without it, only AI chat
+  requires it, and an optional SESSION_SECRET keeps sign-ins across restarts)
 - Use `openai/gpt-oss-120b` as the model
 - Use SQLLite local database for the database, creating a new db if it doesn't exist
 - Start and Stop server scripts for Mac, PC, Linux in scripts/

@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from "react";
 import { Check, X } from "lucide-react";
 import { IconButton } from "@/components/IconButton";
+import type { CardInput } from "@/lib/api";
 
 type NewCardFormProps = {
-  onAdd: (title: string, details: string) => Promise<void>;
+  onAdd: (input: CardInput) => Promise<void>;
   onClose: () => void;
 };
 
@@ -19,7 +20,13 @@ export const NewCardForm = ({ onAdd, onClose }: NewCardFormProps) => {
     }
     setIsSubmitting(true);
     try {
-      await onAdd(title.trim(), details.trim());
+      await onAdd({
+        title: title.trim(),
+        details: details.trim(),
+        priority: "none",
+        dueDate: null,
+        labelIds: [],
+      });
       onClose();
     } catch {
       // failure is surfaced by the parent; keep the form open so input isn't lost
@@ -37,6 +44,7 @@ export const NewCardForm = ({ onAdd, onClose }: NewCardFormProps) => {
         value={title}
         onChange={(event) => setTitle(event.target.value)}
         placeholder="Card title"
+        maxLength={200}
         autoFocus
         required
         className="w-full bg-transparent text-sm font-semibold text-[var(--navy-dark)] outline-none placeholder:font-normal"

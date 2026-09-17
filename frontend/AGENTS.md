@@ -2,232 +2,203 @@
 
 ## Current State
 
-The Kanban board is fully persisted through the backend API — no client-only
-board state left. It's built as a static export (`output: "export"`) and
-served by the backend at `/`; see backend `AGENTS.md` for the build/copy
-step. It sits behind a real (if hardcoded) login gate — see Auth below.
+A multi-user, multi-board Kanban client. Everything is persisted through the
+backend API; there is no client-only board state. It is built as a static
+export (`output: "export"`) and served by the backend at `/` (see
+`backend/AGENTS.md` for the build/copy step).
 
 ## Stack
 
 - Next.js 16 (App Router), React 19, TypeScript
 - Tailwind CSS v4 (via `@tailwindcss/postcss`, imported in `globals.css`)
 - `@dnd-kit/core` + `@dnd-kit/sortable` for drag and drop
+- `lucide-react` for icons (board actions are icon buttons)
 - `clsx` for conditional classnames
-- `lucide-react` for icons (all actions on the board are icon buttons)
-- Vitest + Testing Library for unit/component tests
-- Playwright for e2e tests
+- Vitest + Testing Library for unit/component tests, Playwright for e2e
 
 ## Structure
 
-- `src/app/layout.tsx` — root layout; loads Google fonts (Space Grotesk for
-  display, Manrope for body) as CSS variables, sets page metadata.
-- `src/app/page.tsx` — the `/` route; a client component that is the auth
-  gate (see Auth below). No other routes exist.
-- `src/app/globals.css` — Tailwind import, color tokens as CSS variables
-  (`--accent-yellow`, `--primary-blue`, `--secondary-purple`, `--navy-dark`,
-  `--gray-text`, plus surface/stroke/shadow tokens) matching the palette in the
-  root AGENTS.md, and the `--font-display` / `--font-body` font wiring.
-- `src/lib/kanban.ts` — pure domain types/logic, no data of its own anymore:
-  - Types: `Card`, `Column`, `BoardData`.
-  - `moveCard(columns, activeId, overId)` — pure function computing the new
-    column layout after a drag-and-drop move (same-column reorder,
-    cross-column move, drop-on-column-vs-drop-on-card). Still used for the
-    instant local reorder on drag-end; `lib/api.ts` persists the result.
-- `src/lib/api.ts` — the backend API client. `fetchBoard()` calls
-  `GET /api/board` and adapts its nested `{columns: [{..., cards: [...]}]}`
-  shape into the frontend's normalized `BoardData` (`toBoardData`).
-  `renameColumn`, `addCard`, `deleteCard`, `moveCard` wrap the other board
-  routes (see `backend/app/board.py`). Imported as `import * as api from
-  "@/lib/api"` at call sites to avoid colliding with `kanban.ts`'s own
-  `moveCard`. `sendChatMessage(message, history)` calls `POST /api/chat`
-  (see `backend/app/chat.py`) and adapts its `{reply, board}` response the
-  same way (`toBoardData` on the nested board). `ChatMessage` (`{role: "user"
-  | "assistant", content: string}`) is exported from here since both
-  `lib/api.ts` and `ChatSidebar.tsx` need the shape.
-- `src/components/KanbanBoard.tsx` — top-level client component. Fetches the
-  board from the API on mount (`loading` / error / loaded states — see
-  Persistence below), wires up `@dnd-kit` `DndContext`, and passes down
-  rename / add-card / delete-card handlers. Layout: a one-row app bar (title,
-  column/card counts, `mutationError` banner, icon buttons to show/hide the
-  assistant and log out), then the board and `ChatSidebar`. At `lg:` the page
-  is fixed to the viewport (`h-dvh`): columns are a single row of grid tracks
-  (`auto-cols-[minmax(200px,1fr)]`) sharing the full width, each column
-  scrolls its own cards, and the board scrolls horizontally only when the
-  minimum column width no longer fits (e.g. 1280px with the assistant open).
-  Below `lg:` the page flows normally: columns become a horizontal
-  scroll-snap strip (85% width each) with the assistant stacked underneath.
-  The assistant is hidden with the `hidden` attribute rather than unmounted,
-  so the transcript survives a hide/show (covered by a unit test). A
-  `DragOverlay` renders `KanbanCardPreview` at the dragged card's measured
-  width. `ChatSidebar`'s
-  `onBoardUpdate` prop is wired directly to `setBoard` — every chat response
-  carries the current board (whether or not it changed anything), so the
-  board view is simply always resynced from it, no diffing needed.
-- `src/components/ChatSidebar.tsx` — the AI chat sidebar. Owns the message
-  list (`ChatMessage[]`) and input as local state (no board data lives
-  here). On send: appends the user's message locally, calls
-  `api.sendChatMessage(message, historyBeforeThisTurn)`, appends the
-  assistant's reply on success and calls `onBoardUpdate(board)`, or sets an
-  error message on failure (shown via `role="alert"`, same pattern as
-  `KanbanBoard`'s `mutationError`). Shows a "Thinking..." bubble while a
-  request is in flight. History is entirely client-owned — see the Part 9
-  design decision in `docs/PLAN.md` for why (the sidebar already needs this
-  list in state to render the transcript, so sending it each turn avoids a
-  second, backend-side source of truth). Fixed-height panel: the transcript
-  scrolls internally and is scrolled to the newest message on every update.
-- `src/components/KanbanColumn.tsx` — one column: droppable container,
-  header row with the editable column title (`<input>` — `onChange` updates
-  local state on every keystroke via `onRename`, `onBlur` persists via
-  `onRenameCommit`), a card-count badge and a "+" icon button (accessible name
-  "Add a card") that opens `NewCardForm` at the top of the card list; then
-  `SortableContext` wrapping its cards and an empty-state placeholder.
-- `src/components/KanbanCard.tsx` — one draggable card (`useSortable`),
-  displays title/details, and a trash icon button (accessible name
-  "Delete <title>") in its top-right corner. On devices with hover it only
-  appears on card hover or keyboard focus; on touch devices it is always
-  visible.
-- `src/components/KanbanCardPreview.tsx` — non-interactive visual clone of a
-  card, used only inside `DragOverlay` while dragging.
-- `src/components/NewCardForm.tsx` — the inline add-card form only (the
-  column owns whether it is open). Title/details inputs plus check ("Add
-  card", submit) and X ("Cancel") icon buttons; Escape also cancels.
-  `onAdd(title, details)` returns a `Promise<void>` — the form awaits it and
-  calls `onClose` only on success (the check button is disabled in between),
-  and stays open with the typed input intact if it rejects, so a failed save
-  doesn't lose input.
-- `src/components/IconButton.tsx` — shared round icon-only button. Takes a
-  `label` used as both `aria-label` and the `title` tooltip, so tests and
-  assistive tech find icon buttons by name exactly as they did text buttons.
-  `variant="primary"` is the filled purple submit style.
-- `src/components/LoginForm.tsx` — username/password form; calls
-  `lib/auth.login`, shows an error message on failure, calls `onSuccess(user)`
-  on success.
-- `src/lib/auth.ts` — thin `fetch` wrappers: `fetchSession` (`GET /api/me`,
-  returns `null` on any non-2xx instead of throwing), `login` (`POST
-  /api/login`, throws on failure), `logout` (`POST /api/logout`).
+- `src/app/layout.tsx` — root layout; Google fonts (Space Grotesk display,
+  Manrope body) as CSS variables, page metadata.
+- `src/app/page.tsx` — the only route and the auth gate (see Auth).
+- `src/app/globals.css` — Tailwind import and the palette/surface tokens as
+  CSS variables.
+- `src/lib/kanban.ts` — pure domain types and logic, no I/O:
+  `Card` (`title`, `details`, `priority`, `dueDate`, `labelIds`,
+  `checklist`), `Label` (`name`, `color` from `LABEL_COLORS`),
+  `ChecklistItem`, `Column`, `BoardData` (`id`, `name`, `description`,
+  `labels`, `columns`, `cards`), `BoardSummary`; `moveCard(columns, activeId,
+  overId)` (drag-and-drop reorder/move), `dueStatus(dueDate, today)`
+  (`overdue` / `today` / `upcoming`), `toIsoDate`, `addDays`,
+  `cardMatches(card, query)` for search, `CardFilter` / `EMPTY_FILTER` /
+  `cardPassesFilter(card, filter, today)` / `activeFilterCount`, and
+  `checklistProgress(card)`.
+- `src/lib/api.ts` — the board API client. Converts the backend's nested,
+  snake_case shapes to `BoardData` (`toBoardData`, `toCard`) and back
+  (`due_date`). Functions for boards (`fetchBoards`, `createBoard`,
+  `fetchBoard`, `updateBoard`, `deleteBoard`), columns (`addColumn`,
+  `renameColumn`, `deleteColumn`, `moveColumn`), cards (`addCard`,
+  `updateCard` — sends only the fields in the patch, `deleteCard`, `moveCard`),
+  labels (`createLabel`, `updateLabel`, `deleteLabel`), checklist items
+  (`addChecklistItem`, `updateChecklistItem`, `deleteChecklistItem`) and
+  `sendChatMessage(boardId, message, history)`. Failures throw
+  `ApiError` (`status` + the backend's `detail`). A 401 from any call also
+  invokes the handler registered with `setUnauthorizedHandler`, which
+  `page.tsx` uses to drop back to the sign-in screen when a session expires
+  (sessions end on every server restart unless `SESSION_SECRET` is set).
+  Imported as `import * as api` at call sites to avoid clashing with
+  `kanban.ts`'s `moveCard`.
+- `src/lib/auth.ts` — `fetchSession`, `login`, `register`, `logout`,
+  `changePassword`, `deleteAccount`. Deliberately uses plain `fetch`, not
+  `api.ts`'s `request`, because 401/403 here are expected answers (wrong
+  password), not an expired session; each maps status codes to a
+  user-facing error message.
+- `src/components/AuthForm.tsx` — sign-in form that toggles to "Create
+  account" (register) mode.
+- `src/components/Workspace.tsx` — the signed-in shell. Loads the board
+  list, picks the active board (the one last opened, remembered per user in
+  `localStorage`, else the first), and renders the one-row app bar: title,
+  `BoardSwitcher`, show/hide assistant, username, account settings, log out.
+  Renders `KanbanBoard` keyed by board id (switching boards remounts it), an
+  empty state with "Create a board" when the user has none, and the create
+  board / account dialogs. Handles `onBoardRenamed` / `onBoardDeleted` from
+  the board to keep the switcher list current.
+- `src/components/BoardSwitcher.tsx` — dropdown of the user's boards (with
+  card counts, refreshed each time it opens) plus "New board".
+- `src/components/KanbanBoard.tsx` — one board. Fetches it by `boardId`
+  (loading / error-with-retry / loaded), renders the board toolbar (name,
+  description and counts, board settings, `mutationError` banner, card
+  search, `FilterMenu`, manage labels, add column) and the columns grid plus
+  `ChatSidebar`. Owns all board mutations and the dialogs: card details,
+  labels, add column, delete column and delete board confirmations, board
+  settings. While a search or filter is active, drag and drop is disabled
+  (indices in a filtered list would be wrong). Drag and drop works with the
+  pointer and with the keyboard (`KeyboardSensor`: Space picks up and drops,
+  arrow keys move, Escape cancels; Enter stays free to open a card), and the
+  live-region announcements use card and column names instead of ids.
+  Layout: at `lg:` the workspace is fixed to the viewport; columns share the
+  width as grid tracks (`auto-cols-[minmax(200px,1fr)]`), each column scrolls
+  its own cards, and the board scrolls horizontally only when the minimum
+  width no longer fits. Below `lg:` columns become a horizontal scroll-snap
+  strip with the assistant stacked underneath. The assistant is hidden with
+  the `hidden` attribute rather than unmounted, so its transcript survives
+  hide/show.
+- `src/components/KanbanColumn.tsx` — droppable column: editable title
+  (controlled; persists on blur only if the title actually changed, and a
+  cleared title reverts), card count, "+" (`Add a card`) opening
+  `NewCardForm` at the top of the list, and a "Column actions" menu (move
+  left, move right, delete).
+- `src/components/KanbanCard.tsx` — sortable card. Clicking it (or Enter)
+  opens the card dialog; Enter's keydown is `preventDefault`ed, because
+  otherwise the rest of the keystroke lands in the dialog's autofocused title
+  and submits the form. A trash icon (`Delete <title>`) deletes the card
+  immediately. Shows label chips and priority, due-date and checklist
+  progress badges via the shared `CardBody`, which `KanbanCardPreview` (the
+  `DragOverlay` clone) also uses.
+- `src/components/CardDialog.tsx` — edit title, details, priority, due date
+  and labels (saved together with Save), plus the checklist, whose changes
+  save immediately: add (the input clears on submit so typing the next item
+  during the save isn't lost; restored on failure), tick (optimistic, rolled
+  back on failure), delete. Stays open with an error if saving fails.
+- `src/components/LabelChip.tsx` — colored label pill; `LABEL_COLOR_CLASSES`
+  maps the palette color names to CSS-variable tints.
+- `src/components/LabelsDialog.tsx` — create, rename (on blur), recolor and
+  delete a board's labels; explains duplicate names (409).
+- `src/components/FilterMenu.tsx` — priority, label and due-date filters
+  with an active-count badge and "Clear filters".
+- `src/components/NewCardForm.tsx` — inline title/details form; stays open
+  with the typed input if the add fails.
+- `src/components/BoardDialog.tsx` — create/edit board (name, description),
+  optional delete action.
+- `src/components/AccountDialog.tsx` — change password; delete account
+  (requires the password).
+- `src/components/ChatSidebar.tsx` — AI chat for the current board. Owns the
+  transcript as local state and sends it as `history` each turn (the backend
+  is stateless and trims history itself). Always applies the board returned
+  by the reply via `onBoardUpdate`. Scrolls to the newest message.
+- `src/components/Modal.tsx` — accessible dialog (`role="dialog"`, labelled
+  by its title, Escape/backdrop to close), `ConfirmDialog`, and shared form
+  field classes. `window.confirm` is avoided (jsdom does not implement it).
+- `src/components/IconButton.tsx` — round icon-only button whose `label` is
+  both the `aria-label` and the tooltip, so tests and assistive tech find
+  icon buttons by name.
 
 ## Auth
 
 `page.tsx` is a three-state gate (`loading` / `anonymous` / `authenticated`)
-that calls `fetchSession()` in a `useEffect` on mount:
-- `loading` (initial state, and what gets statically prerendered at build
-  time since the effect hasn't run yet) renders nothing — this is what keeps
-  board content from ever appearing before auth is confirmed, even in the
-  static HTML shell.
-- `anonymous` renders `<LoginForm onSuccess={...} />`.
-- `authenticated` renders `<KanbanBoard onLogout={...} />`; `KanbanBoard`
-  has a "Log out" icon button in its app bar wired to that prop.
-
-There's no client-side session storage of its own — the backend's signed
-session cookie is the source of truth; the frontend just asks `/api/me` on
-load and reacts to 200 vs 401.
+driven by `fetchSession()` on mount. `loading` renders nothing (also what the
+static prerender contains), so board content never flashes before auth is
+confirmed. `anonymous` renders `AuthForm`; `authenticated` renders
+`Workspace` keyed by username. Log out, account deletion and any 401 from
+`api.ts` return to `anonymous`. The backend's signed session cookie is the
+only source of truth.
 
 ## Persistence
 
-`KanbanBoard` fetches the board from the API in a `useEffect` on mount, with
-three render states: `board === null && !loadError` → "Loading board..."
-text; `loadError` → an error message with a Retry button that re-fetches;
-otherwise the board itself. There's no client-only board state left — every
-mutation goes through `lib/api.ts`. The persistence strategy differs by
-interaction, deliberately, not inconsistently:
-- **Typing a column title / dragging a card** need instant feedback, so
-  these apply the change to local state immediately (`onRename` per
-  keystroke; `moveCard` from `kanban.ts` on drag-end) and persist in the
-  background (`onRenameCommit` on blur; `api.moveCard` fired right after the
-  local update). A failed background persist sets `mutationError` (shown as
-  an inline banner in the app bar) — a failed move also re-fetches the board to
-  resync with the server.
-- **Add / delete card** are discrete button clicks where a small delay is
-  imperceptible, so these `await` the API call before touching local state
-  at all (add needs the server-assigned id anyway; see `NewCardForm` above
-  for how a failed add is surfaced without losing the typed input).
-
-## Data flow
-
-`BoardData` lives in `KanbanBoard`, seeded from `lib/api.fetchBoard()`. There
-is no context or state library — state and handlers are passed down as props
-one level at a time. `board.cards` is a `Record<id, Card>`; `board.columns`
-holds ordered `cardIds` arrays, so moving a card is purely a matter of
-recomputing which column's `cardIds` array contains which ids and in what
-order (`moveCard`). IDs are opaque strings assigned by the backend
-(`"col-3"`, `"card-12"`) — nothing on the frontend parses or generates them.
+The strategy differs by interaction, deliberately:
+- **Typing a column title / dragging a card / moving a column / ticking a
+  checklist item** need instant feedback: local state changes first and the API call runs in the
+  background. A failed call sets `mutationError` and re-fetches the board to
+  resync.
+- **Add/edit/delete card, add/delete column, board changes** are discrete
+  actions where a short wait is imperceptible: they `await` the API before
+  touching local state (adding needs the server-assigned id anyway).
 
 ## Testing
 
-- Unit/component tests: `npm run test` / `test:unit` (Vitest, jsdom). Located
-  next to the code they test (`*.test.ts` / `*.test.tsx`):
-  - `src/lib/kanban.test.ts` — covers `moveCard` (reorder, cross-column move,
-    drop-on-column).
-  - `src/components/KanbanBoard.test.tsx` — `vi.mock("@/lib/api")`, so no
-    network involved. Covers loading state, load-error state (with the API
-    layer mocked, not a real backend), logout wiring, rename (local echo +
-    persist-on-blur), add/delete a card, a failed add keeping the form's
-    input intact, and that an AI chat reply's returned board is reflected in
-    the UI with no reload. `LoginForm`/`lib/auth.ts` have no dedicated unit
-    tests — they're thin enough that the Playwright login flow (below)
-    already covers them without duplicating the same assertions at a second
-    layer.
-  - `src/components/ChatSidebar.test.tsx` — `vi.mock("@/lib/api")`. Covers:
-    sending a message shows both the user's message and the reply; a
-    successful reply calls `onBoardUpdate` with the returned board; the
-    prior turns are sent back as `history` on the next message; a pending
-    call shows the "Thinking..." state; a rejected call shows the error
-    state.
-- Mocked e2e tests: `npm run test:e2e` (Playwright), driven against a
-  `next dev` server on `127.0.0.1:3000` (see `playwright.config.ts`) with no
-  real backend — `/api/*` calls are mocked with `page.route()` via
-  `tests/support/auth.ts` (session) and `tests/support/board.ts` (board CRUD,
-  seeded with the same demo data the backend's `init_db()` seeds a real
-  database with). This is the fast day-to-day suite for UI behavior.
-  - `tests/kanban.spec.ts` — board interactions; `beforeEach` mocks an
-    already-authenticated session + board so these don't re-test login each
-    time.
-  - `tests/login.spec.ts` — the login gate itself: shows the login form when
-    unauthenticated, rejects wrong credentials with a visible error, and a
-    full login → logout round trip.
-- Full-stack e2e tests: `npm run test:e2e:full` (from `frontend/`) or
-  `scripts/test-e2e-full.sh` (from the repo root) — builds the real Docker
-  image, runs it (with `--env-file .env` so `OPENROUTER_API_KEY` reaches the
-  container — needed for the live AI test below), waits for `/api/hello` to
-  respond, runs everything in `tests-full-stack/` with
-  `playwright.full-stack.config.ts` (`baseURL` = the container on `:8000`,
-  no mocked routes, no `webServer` — the shell script owns the container's
-  lifecycle and always tears it down on exit via a `trap`). Both specs share
-  that one live backend + SQLite DB, so the config sets `workers: 1` to run
-  them serially rather than racing each other's mutations. Deliberately kept
-  separate from `test:e2e` since it needs Docker (and, for the AI spec, live
-  network) and is much slower — not part of the fast loop.
-  - `tests-full-stack/board-persistence.spec.ts` — log in, rename a column,
-    add a card, delete a card, reload, and assert all three changes survived
-    against the real backend + SQLite.
-  - `tests-full-stack/ai-chat.spec.ts` — log in, send a message through the
-    real chat sidebar asking to add a card to the first column (reading that
-    column's current title from the DOM rather than assuming "Backlog",
-    since `board-persistence.spec.ts` may have already renamed it), and
-    assert the card shows up with no reload — a live, unmocked call through
-    the full Part 9 structured-output path. Uses a longer (30s) assertion
-    timeout for that one expectation, since it's waiting on a real LLM call.
-- `npm run test:all` runs lint + the unit + mocked-e2e suites (not the
-  full-stack one — run that explicitly).
-- `src/test/vitest.d.ts` must reference `vitest/globals` (not `vitest`) and
-  `@testing-library/jest-dom/vitest` (not `@testing-library/jest-dom`) — the
-  bare specifiers resolve to Jest-flavoured types and leave `describe`/`it`/
-  `expect`/`vi` and the DOM matchers untyped. That failure shows up only in
-  `next build`'s TypeScript pass, which type-checks test files too; `vitest
-  run` passes either way.
+- `npm run test:all` runs lint, unit tests and the mocked e2e suite. Run the
+  full-stack suite separately.
+- Unit/component (Vitest, jsdom): `*.test.ts(x)` next to the code. Coverage:
+  `npx vitest run --coverage`. Components mock `@/lib/api` / `@/lib/auth`
+  with `vi.mock`; `src/lib/api.test.ts` and `src/lib/auth.test.ts` stub
+  `fetch` to check paths, methods, payload mapping and error handling. Shared
+  builders live in `src/test/fixtures.ts` (`buildCard`, `buildBoard`,
+  `buildLabeledBoard`). `vi.mock` automocks `ApiError`, so tests that need a
+  status build it with `Object.assign(new api.ApiError(...), { status })`.
+- Mocked e2e (`npm run test:e2e`, Playwright against `next dev` on
+  `127.0.0.1:3000`): `tests/support/mockApi.ts` is a stateful in-memory fake
+  of the whole backend installed with `page.route("**/api/**")`, so flows
+  can create, edit and reload realistically. `MockApi.install(page,
+  { signedInAs })` starts signed in or out; `expireSessionOnNextRequest`
+  simulates a lapsed session.
+  - `tests/login.spec.ts` — sign in/out, bad credentials, registration,
+    taken username, expired session returning to sign-in.
+  - `tests/kanban.spec.ts` — add card, drag between columns, edit priority
+    and due date (survives reload), search, add/reorder/delete columns, chat.
+  - `tests/boards.spec.ts` — create, switch, remember last board, rename,
+    delete, empty state.
+  - `tests/cards.spec.ts` — label a card and filter by label, manage labels
+    (including duplicates), checklist progress surviving reload, Enter opens
+    a card without saving it, keyboard drag and drop (waits on the live-region
+    announcements between key presses rather than sleeping).
+  - Note: `next dev` injects its own `role="alert"` route announcer, and a
+    card's accessible name contains its delete button's name; prefer text or
+    `exact: true` selectors in those cases.
+- Full-stack e2e (`npm run test:e2e:full` or `scripts/test-e2e-full.sh`):
+  builds and runs the real Docker image, waits for `/api/health`, runs
+  `tests-full-stack/` serially (`workers: 1`, shared database) with no
+  mocks. `board-persistence.spec.ts` (edits survive reload),
+  `ai-chat.spec.ts` (live OpenRouter call adds a card; waits for the reply
+  up to the backend's worst-case model time and retries the message once,
+  since the live model occasionally proposes an operation the backend
+  rejects), `accounts.spec.ts`
+  (two registered users cannot see each other's boards; board creation,
+  password change, account deletion), `card-details.spec.ts` (labels,
+  checklist and label filter persist against real SQLite).
+- `src/test/vitest.d.ts` must reference `vitest/globals` and
+  `@testing-library/jest-dom/vitest`; the bare specifiers leave the test
+  globals untyped, which only fails in `next build`'s TypeScript pass.
 
 ## Conventions to follow when extending this code
 
-- Keep board-mutation logic as pure functions in `src/lib/kanban.ts` (like
-  `moveCard`) rather than inlining it in components, so it stays unit
+- Keep board logic as pure functions in `src/lib/kanban.ts` so it stays unit
   testable without rendering.
-- Components stay presentational/handler-driven — state changes flow back up
-  via callback props (`onRename`, `onAddCard`, `onDeleteCard`), not local
-  component state for board data.
-- Use the CSS variables in `globals.css` for color, not new hardcoded hex
-  values, to stay on the palette defined in the root AGENTS.md.
-- `data-testid` attributes (`column-${id}`, `card-${id}`) are used for test
-  targeting — keep these stable when refactoring markup.
+- Board data lives in `KanbanBoard`; child components are presentational and
+  report changes through callback props.
+- Use the CSS variables in `globals.css` for color, not hardcoded hex values.
+- Give every icon-only control a label through `IconButton`.
+- `data-testid` attributes (`column-${id}`, `card-${id}`, `priority-badge`,
+  `due-badge`, `checklist-progress`) are used by tests; keep them stable.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

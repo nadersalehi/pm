@@ -2,15 +2,12 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatSidebar } from "@/components/ChatSidebar";
 import * as api from "@/lib/api";
+import { buildBoard } from "@/test/fixtures";
 
 vi.mock("@/lib/api");
 
 const mockedApi = vi.mocked(api);
 
-const buildBoard = () => ({
-  columns: [{ id: "col-1", title: "Backlog", cardIds: [] }],
-  cards: {},
-});
 
 const sendMessage = async (text: string) => {
   await userEvent.type(screen.getByLabelText("Chat message"), text);
@@ -23,13 +20,14 @@ describe("ChatSidebar", () => {
       reply: "Added it.",
       board: buildBoard(),
     });
-    render(<ChatSidebar onBoardUpdate={() => {}} />);
+    render(<ChatSidebar boardId="board-1" onBoardUpdate={() => {}} />);
 
     await sendMessage("add a card to Backlog");
 
     expect(await screen.findByText("add a card to Backlog")).toBeInTheDocument();
     expect(await screen.findByText("Added it.")).toBeInTheDocument();
     expect(mockedApi.sendChatMessage).toHaveBeenCalledWith(
+      "board-1",
       "add a card to Backlog",
       []
     );
@@ -39,7 +37,7 @@ describe("ChatSidebar", () => {
     const board = buildBoard();
     mockedApi.sendChatMessage.mockResolvedValue({ reply: "Done.", board });
     const onBoardUpdate = vi.fn();
-    render(<ChatSidebar onBoardUpdate={onBoardUpdate} />);
+    render(<ChatSidebar boardId="board-1" onBoardUpdate={onBoardUpdate} />);
 
     await sendMessage("hi");
 
@@ -51,7 +49,7 @@ describe("ChatSidebar", () => {
       reply: "First reply.",
       board: buildBoard(),
     });
-    render(<ChatSidebar onBoardUpdate={() => {}} />);
+    render(<ChatSidebar boardId="board-1" onBoardUpdate={() => {}} />);
 
     await sendMessage("first");
     await screen.findByText("First reply.");
@@ -63,7 +61,7 @@ describe("ChatSidebar", () => {
     await sendMessage("second");
 
     await waitFor(() =>
-      expect(mockedApi.sendChatMessage).toHaveBeenLastCalledWith("second", [
+      expect(mockedApi.sendChatMessage).toHaveBeenLastCalledWith("board-1", "second", [
         { role: "user", content: "first" },
         { role: "assistant", content: "First reply." },
       ])
@@ -72,7 +70,7 @@ describe("ChatSidebar", () => {
 
   it("shows a loading state while waiting on the reply", async () => {
     mockedApi.sendChatMessage.mockReturnValue(new Promise(() => {}));
-    render(<ChatSidebar onBoardUpdate={() => {}} />);
+    render(<ChatSidebar boardId="board-1" onBoardUpdate={() => {}} />);
 
     await sendMessage("hi");
 
@@ -81,7 +79,7 @@ describe("ChatSidebar", () => {
 
   it("shows an error state when the call fails", async () => {
     mockedApi.sendChatMessage.mockRejectedValueOnce(new Error("network error"));
-    render(<ChatSidebar onBoardUpdate={() => {}} />);
+    render(<ChatSidebar boardId="board-1" onBoardUpdate={() => {}} />);
 
     await sendMessage("hi");
 

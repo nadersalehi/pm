@@ -8,10 +8,11 @@ import type { ChatMessage } from "@/lib/api";
 import { IconButton } from "@/components/IconButton";
 
 type ChatSidebarProps = {
+  boardId: string;
   onBoardUpdate: (board: BoardData) => void;
 };
 
-export const ChatSidebar = ({ onBoardUpdate }: ChatSidebarProps) => {
+export const ChatSidebar = ({ boardId, onBoardUpdate }: ChatSidebarProps) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -38,7 +39,7 @@ export const ChatSidebar = ({ onBoardUpdate }: ChatSidebarProps) => {
     setIsSending(true);
 
     try {
-      const { reply, board } = await api.sendChatMessage(trimmed, history);
+      const { reply, board } = await api.sendChatMessage(boardId, trimmed, history);
       setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
       onBoardUpdate(board);
     } catch {

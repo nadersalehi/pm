@@ -1,18 +1,14 @@
-import type { Card } from "@/lib/kanban";
+import { CardBody } from "@/components/KanbanCard";
+import type { Card, Label } from "@/lib/kanban";
 
 type KanbanCardPreviewProps = {
   card: Card;
+  today: string;
+  labels: Label[];
 };
 
-export const KanbanCardPreview = ({ card }: KanbanCardPreviewProps) => (
+export const KanbanCardPreview = ({ card, today, labels }: KanbanCardPreviewProps) => (
   <article className="rotate-1 cursor-grabbing rounded-2xl border border-[var(--stroke)] bg-white px-3 py-3 shadow-[0_18px_32px_rgba(3,33,71,0.18)]">
-    <h4 className="break-words pr-7 font-display text-sm font-semibold leading-5 text-[var(--navy-dark)]">
-      {card.title}
-    </h4>
-    {card.details && (
-      <p className="mt-1 break-words text-xs leading-5 text-[var(--gray-text)]">
-        {card.details}
-      </p>
-    )}
+    <CardBody card={card} today={today} labels={labels} />
   </article>
 );

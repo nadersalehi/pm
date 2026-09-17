@@ -1,87 +1,75 @@
 # Database
 
-Schema definition with an example row set: `docs/schema.json`. This document
-explains the design decisions behind it.
+SQLite, created on first run (`backend/app/db.py`). Example rows are in
+`docs/schema.json`.
 
 ## Why SQLite
 
-Per root `AGENTS.md`: the whole app runs in a single local Docker container
-for the MVP, with no separate database service. SQLite is a single file,
-needs no server process, and Python's standard library talks to it directly
-— the simplest option that still gives us real relational storage and
-survives container restarts (the file lives on disk, not in memory). The
-file is created on first run if it doesn't exist (Part 6).
+The app runs as a single local Docker container with no separate database
+service. SQLite is a single file, needs no server, and Python's standard
+library talks to it directly.
 
 ## Tables
 
-- **`users`** — one row per signed-in user. `id`, `username`, `password`.
-  Part 4's login route still checks the hardcoded `user`/`password` in code,
-  not this column — it's stored (plaintext, matching the hardcoded value)
-  so the table is already a complete source of truth once real multi-user
-  auth replaces that hardcoded check. At that point `password` should hold a
-  proper hash, not plaintext — worth calling out now since it's easy to miss
-  later.
-- **`boards`** — one row per board. `id`, `user_id` (FK → `users.id`).
-- **`columns`** — a board's columns. `id`, `board_id` (FK → `boards.id`),
-  `title`, `position`.
-- **`cards`** — a column's cards. `id`, `column_id` (FK → `columns.id`),
-  `title`, `details`, `position`.
+- **`users`** — `id`, `username` (unique, case-insensitive via `COLLATE
+  NOCASE`), `password_hash` (scrypt, see `backend/app/security.py`; never
+  plaintext), `created_at`.
+- **`boards`** — `id`, `user_id` → `users.id`, `name`, `description`,
+  `created_at`. A user can have any number of boards.
+- **`columns`** — `id`, `board_id` → `boards.id`, `title`, `position`.
+- **`cards`** — `id`, `column_id` → `columns.id`, `title`, `details`,
+  `priority` (`none`/`low`/`medium`/`high`, enforced by a `CHECK`),
+  `due_date` (ISO `YYYY-MM-DD` text or NULL), `position`, `created_at`.
+- **`labels`** — `id`, `board_id` → `boards.id`, `name` (unique per board,
+  case-insensitive), `color` (`yellow`/`blue`/`purple`/`navy`/`gray`, the
+  app's palette names, enforced by a `CHECK`).
+- **`card_labels`** — `card_id` → `cards.id`, `label_id` → `labels.id`;
+  composite primary key. Labels are board-scoped, so a card may only carry
+  labels from its own board (enforced in `board.py`, not the schema).
+- **`checklist_items`** — `id`, `card_id` → `cards.id`, `text`, `done`
+  (0/1), `position`.
 
-IDs are `INTEGER PRIMARY KEY` (SQLite rowids) for simplicity on the backend.
-The API layer (Part 6) will expose them to the frontend as opaque strings
-(e.g. `"col-3"`, `"card-12"`) — the frontend's `Card`/`Column` types already
-treat `id` as an opaque string (`frontend/src/lib/kanban.ts`), so this is a
-transparent change from the frontend's point of view; nothing there compares
-or parses ids as numbers.
+Every foreign key is `ON DELETE CASCADE`, and `PRAGMA foreign_keys = ON` is
+set on each connection: deleting a user removes their boards, columns and
+cards; deleting a board or column removes everything under it. Each foreign
+key column is indexed.
 
-## "One board per user" (MVP) vs. multi-board (future)
+IDs are integer primary keys internally and opaque strings in the API
+(`board-1`, `col-3`, `card-12`); the frontend never parses them.
 
-Root `AGENTS.md` lists both "hardcoded single user" and "1 board per user"
-explicitly as MVP limitations, with the database explicitly called out as
-needing to support more users later. So `boards.user_id` is a plain FK, not
-a unique one — nothing in the schema stops a user from having multiple
-boards. The MVP's "exactly one board" rule is an application-level
-convention (Part 6: get-or-create the current user's board), not a schema
-constraint. That means adding multi-board support later is a
-backend/frontend feature change, not a migration.
+## Ownership
+
+Only `boards.user_id` records ownership. Columns and cards are owned through
+their board, so every API lookup of a column or card joins up to `boards`
+and filters on the signed-in user. A request for another user's id behaves
+exactly like a request for a nonexistent one (404).
 
 ## Ordering
 
-- **Columns**: per root `AGENTS.md`, the board's columns are fixed — only
-  the title can be edited, columns are never added, removed, or reordered.
-  So `columns.position` is assigned once, when the board is created, and
-  never changes afterward.
-- **Cards**: `cards.position` determines render order within `column_id`.
-  Positions only need to be monotonically increasing within a column, not
-  contiguous — deleting a card can leave gaps, that's fine. Adding a card
-  appends at the end of its column. Moving a card (reorder within a column,
-  or to a different column) means the backend rewrites `column_id` and
-  `position` for the moved card and renumbers the affected column(s) —
-  the same operation `moveCard` in `frontend/src/lib/kanban.ts` already
-  performs today on in-memory arrays; Part 6 reimplements that logic against
-  these rows.
+`columns.position` orders columns within a board and `cards.position` orders
+cards within a column. New rows are appended after the current maximum.
+Moves and deletes renumber the affected rows to be contiguous from 0, so
+positions always match what the UI shows.
 
-## Coverage check against the current frontend
+## Versioning
 
-Walked `frontend/src/lib/kanban.ts`'s `BoardData` shape and every action the
-demo UI supports against this schema:
+`init_db()` records `SCHEMA_VERSION` in `PRAGMA user_version`.
 
-| Frontend shape / action | Schema |
-| --- | --- |
-| `Card { id, title, details }` | `cards` row |
-| `Column { id, title, cardIds }` | `columns` row; `cardIds` order is `cards` rows for that `column_id` ordered by `position` — same information, normalized |
-| `BoardData { columns, cards }` | one `boards` row + its `columns`/`cards` rows |
-| Rename column | `UPDATE columns SET title = ?` |
-| Add card | `INSERT INTO cards (...)` with `position` after the current max in that column |
-| Delete card | `DELETE FROM cards WHERE id = ?` |
-| Reorder card within a column | `UPDATE cards SET position = ...` for the moved card and the cards between its old and new spot |
-| Move card to another column | `UPDATE cards SET column_id = ?, position = ?` plus renumbering in the source and destination columns |
+- Version 1: users, boards, columns, cards.
+- Version 2: adds `labels`, `card_labels`, `checklist_items`. The upgrade
+  from version 1 only adds tables, so `CREATE TABLE IF NOT EXISTS` performs
+  it; `tests/test_db.py` checks that existing rows survive.
 
-Nothing in the current demo's data or interactions is lost by this schema.
+Databases from the original single-user MVP were never persisted (the
+container has no volume), so there is no migration from that layout. A
+future change that alters existing tables needs an explicit step keyed on the
+stored version.
 
 ## Seeding
 
-`docs/schema.json`'s example rows are exactly `frontend/src/lib/kanban.ts`'s
-`initialData` translated to rows. Part 6 will use this same data to seed a
-freshly created database, so the persisted app starts from the same board
-the standalone demo does today.
+When the `users` table is empty, `init_db()` creates the demo account
+(`user` / `password`) with a "Product Roadmap" board holding the five default
+columns, eight example cards, three labels (one applied to the first card)
+and a two-item checklist. Every new board, including the starter board
+a newly registered user gets, starts with the same five empty columns:
+Backlog, Discovery, In Progress, Review, Done.
